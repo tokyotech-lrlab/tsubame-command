@@ -1,0 +1,127 @@
+#!/bin/bash -e
+
+# generate job script
+# -N: name of the job
+# -l: resource requirements (multiple values can be specified)
+# -t: time limit
+# -p: priority (optional)
+# -c, --command: command to run
+
+# parse arguments
+while [[ $# -gt 0 ]]; do
+    key="$1"
+    case $key in
+    -N | --name)
+        JOB_NAME="$2"
+        shift
+        shift
+        ;;
+    -l | --resource)
+        RESOURCE="$2"
+        shift
+        shift
+        ;;
+    -t | --time)
+        TIME="$2"
+        shift
+        shift
+        ;;
+    -p | --priority)
+        PRIORITY="$2"
+        shift
+        shift
+        ;;
+    -c | --command)
+        shift
+        COMMAND="$*" # all remaining arguments
+        break
+        ;;
+    *)
+        echo "Unknown option: $1"
+        exit 1
+        ;;
+    esac
+done
+
+# set default job name
+JOB_NAME=${JOB_NAME:-"example"}
+JOB_NAME="${JOB_NAME}.$(date +'%Y-%m-%d_%H-%M-%S')"
+
+# job script name
+mkdir -p job_scripts/trial
+JOB_SCRIPT="job_scripts/${JOB_NAME}.sh"
+TRIAL_JOB_SCRIPT="job_scripts/trial/${JOB_NAME}.sh"
+
+# check if the job script already exists
+if [ -f ${JOB_SCRIPT} ]; then
+    echo "Error: ${JOB_SCRIPT} already exists"
+    exit 1
+fi
+
+# priority
+PRIORITY=${PRIORITY:-"-5"}
+
+# config
+if [ -f "tsubame_env.json" ]; then
+    CONFIG_JSON="$(cat tsubame_env.json)"
+else
+    CONFIG_JSON="$(cat $(cd $(dirname $0); pwd)/tsubame_env.json)"
+fi
+echo "Read config file: ${CONFIG_JSON}"
+
+# write job script
+cat <<EOF >${JOB_SCRIPT}
+#!/bin/bash
+#$ -cwd
+#$ -N $JOB_NAME
+#$ -o job_out/${JOB_NAME}.out
+#$ -j y
+#$ -l $RESOURCE
+#$ -l h_rt=$TIME
+#$ -p $PRIORITY
+
+# load modules
+$(for item in $(echo $CONFIG_JSON | jq -r -c '.module[]'); do echo "module load $item"; done)
+
+# setup environment
+$(echo $CONFIG_JSON | jq -r -c '.env_command[]')
+
+# run command
+echo "Start job: $JOB_NAME"
+$COMMAND
+EOF
+
+# write trial job script
+cat <<EOF >${TRIAL_JOB_SCRIPT}
+#!/bin/bash
+#$ -cwd
+#$ -N TRY.$JOB_NAME
+#$ -o job_out/trial/${JOB_NAME}.out
+#$ -j y
+#$ -l $RESOURCE
+#$ -l h_rt=00:10:00
+#$ -p -5
+
+# load modules
+$(for item in $(echo $CONFIG_JSON | jq -r -c '.module[]'); do echo "module load $item"; done)
+
+# setup environment
+$(echo $CONFIG_JSON | jq -r -c '.env_command[]')
+
+# run command
+echo "Start job: $JOB_NAME"
+$COMMAND
+EOF
+
+echo "Successfully generated: ${JOB_SCRIPT}"
+echo ------------------------------
+cat ${JOB_SCRIPT}
+echo ------------------------------
+
+echo "To submit the job, run following command:"
+echo "Trial run ---------------------------"
+echo "(run) qsub ${TRIAL_JOB_SCRIPT}"
+echo "(view) less +F job_out/trial/${JOB_NAME}.out"
+echo "Run ---------------------------------"
+echo "(run): qsub -g \$GROUPNAME ${JOB_SCRIPT}"
+echo "(view) less +F job_out/${JOB_NAME}.out"

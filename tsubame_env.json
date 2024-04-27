@@ -1,0 +1,10 @@
+{
+    "module": [
+        "cuda/12.3.2",
+        "cudnn/9.0.0"
+    ],
+    "env_command": [
+        "source ~/.bashrc",
+        "conda activate env"
+    ]
+}
